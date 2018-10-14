@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	//"github.com/bwmarrin/dgvoice"
+	//"github.com/bwmarrin/dgvoice"//音声再生用
 	"github.com/bwmarrin/discordgo"
 	"layeh.com/gopus"
 	"log"
