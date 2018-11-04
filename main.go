@@ -1,29 +1,46 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	//"github.com/bwmarrin/dgvoice"//音声再生用
 	"github.com/bwmarrin/discordgo"
-	"layeh.com/gopus"
+	"github.com/jonas747/dca"
+	"io"
+	"io/ioutil"
 	"log"
+	//"runtime"
 	"strconv"
 	"strings"
 	"time"
 )
 
 var (
-	Token             = "Bot NDk4NzQzNDkxODYyNTkzNTQ2.DpyMUw.E_QptUvTp0bg7OFFxcykRT5gOtM" //"Bot"という接頭辞がないと401 unauthorizedエラーが起きます
+	//Token             = "Bot NDk4NzQzNDkxODYyNTkzNTQ2.DpyMUw.E_QptUvTp0bg7OFFxcykRT5gOtM" //"Bot"という接頭辞がないと401 unauthorizedエラーが起きます
+	Token             = "Bot NDk4NzQzNDkxODYyNTkzNTQ2.Dqdh1w.etTYfhPevzKxzMqjD4eD86S3gM0"
 	BotName           = "498743491862593546"
 	stopBot           = make(chan bool)
 	vcsession         *discordgo.VoiceConnection
 	HelloWorld        = "!helloworld"
 	ChannelVoiceJoin  = "!vcjoin"
 	ChannelVoiceLeave = "!vcleave"
+	Folder            = flag.String("f", "sounds", "Folder of files to play.")
 	//EggplantRequest   = "!eg"
 	//Doutei            = "!eg dou" // WIP
 )
 
 func main() {
+
+	var (
+		//Token = flag.String("t", "Bot NDk4NzQzNDkxODYyNTkzNTQ2.DpyMUw.E_QptUvTp0bg7OFFxcykRT5gOtM", "Discord token.")
+		//GuildID = flag.String("g", "493359894091530242", "Guild ID")
+		//GuildID = flag.String("g", "502056641227784204", "Guild ID")
+		//ChannelID = flag.String("c", "493359894091530246", "Channel ID")
+		//ChannelID = flag.String("c", "502056641680637955", "Channel ID")
+		//Folder    = flag.String("f", "sounds", "Folder of files to play.")
+		err error
+	)
+
+	flag.Parse()
 	//Discordのセッションを作成
 	discord, err := discordgo.New()
 	discord.Token = Token
@@ -70,7 +87,38 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			egString += ":eggplant:"
 		}
 		sendMessage(s, c, egString)
-	case strings.HasPrefix(m.Content, "!eg dou"):
+	case strings.HasPrefix(m.Content, "!summon"):
+		//vcsession, _ = s.ChannelVoiceJoin(c.GuildID, "502056641680637955", false, false)//邪悪な闇の実験場
+		vcsession, _ = s.ChannelVoiceJoin(c.GuildID, "493359894091530246", false, false) //ほんちゃん
+	case strings.HasPrefix(m.Content, "!s"):
+		var fileName = strings.TrimLeft(m.Content, "!s ")
+		fileName += ".mp3"
+		//var fileName += ".mp3"
+		fmt.Println("Reading Folder: ", *Folder)
+		files, _ := ioutil.ReadDir("sounds")
+		for _, f := range files {
+			fmt.Println("PlayAudioFile:", f.Name())
+			//
+			//fmt.Println("PlayAudioFile:", fileName)
+			//s.UpdateStatus(0, f.Name())
+			//s.UpdateStatus(0, fileName)
+			//fmt.Sprintf("sounds/%s", fileName)
+			if fileName == f.Name() {
+				PlayAudioFile(vcsession, fmt.Sprintf("%s/%s", *Folder, f.Name()))
+			}
+			//}
+		}
+		//vcsession.Close()
+		//s.Close()
+
+		//return //とりま
+
+	case strings.HasPrefix(m.Content, "!leave"):
+		vcsession.Close()
+		//s.Close()
+
+	case strings.HasPrefix(m.Content, "!help"):
+		sendMessage(s, c, "!eg <数字> : 指定したナス送信\r\n!summon : VCチャンネルに召喚\r\n!s <ファイル名> : 再生\r\n!leave : VCチャンネルから退出")
 		// WIP
 
 		//今いるサーバーのチャンネル情報の一覧を喋らせる処理を書いておきますね
@@ -103,5 +151,49 @@ func sendMessage(s *discordgo.Session, c *discordgo.Channel, msg string) {
 	log.Println(">>> " + msg)
 	if err != nil {
 		log.Println("Error sending message: ", err)
+	}
+}
+
+func PlayAudioFile(v *discordgo.VoiceConnection, filename string) {
+	// Send "speaking" packet over the voice websocket
+	err := v.Speaking(true)
+	if err != nil {
+		log.Fatal("Failed setting speaking", err)
+	}
+
+	// Send not "speaking" packet over the websocket when we finish
+	defer v.Speaking(false)
+
+	opts := dca.StdEncodeOptions
+	opts.RawOutput = true
+	opts.Bitrate = 120
+	opts.Volume = 30 //volume
+
+	encodeSession, err := dca.EncodeFile(filename, opts)
+	if err != nil {
+		log.Fatal("Failed creating an encoding session: ", err)
+	}
+
+	done := make(chan error)
+	stream := dca.NewStream(encodeSession, v, done)
+
+	ticker := time.NewTicker(time.Second)
+
+	for {
+		select {
+		case err := <-done:
+			if err != nil && err != io.EOF {
+				log.Fatal("An error occured", err)
+			}
+
+			// Clean up incase something happened and ffmpeg is still running
+			encodeSession.Truncate()
+			return
+		case <-ticker.C:
+			stats := encodeSession.Stats()
+			playbackPosition := stream.PlaybackPosition()
+
+			fmt.Printf("Playback: %10s, Transcode Stats: Time: %5s, Size: %5dkB, Bitrate: %6.2fkB, Speed: %5.1fx\r", playbackPosition, stats.Duration.String(), stats.Size, stats.Bitrate, stats.Speed)
+		}
 	}
 }
